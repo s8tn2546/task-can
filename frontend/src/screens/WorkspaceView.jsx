@@ -13,14 +13,6 @@ export default function WorkspaceView() {
   const workspace = state.workspaces.find((w) => w.id === workspaceId);
   const boards = state.boards[workspaceId] || [];
 
-  function handleCreateBlank() {
-    if (!boardName.trim()) return;
-    const board = createBoard(workspaceId, boardName.trim());
-    setBoardName('');
-    setShowCreate(false);
-    navigate(`/board/${board.id}`);
-  }
-
   function handleCreateAi() {
     if (!boardName.trim()) return;
     const board = createBoard(workspaceId, boardName.trim());
@@ -143,27 +135,10 @@ export default function WorkspaceView() {
                 onChange={(e) => setBoardName(e.target.value)}
                 autoFocus
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && boardName.trim()) handleCreateBlank();
+                  if (e.key === 'Enter' && boardName.trim()) handleCreateAi();
                 }}
               />
               <div style={styles.choiceGroup}>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  style={{
-                    ...styles.choiceBtn,
-                    opacity: boardName.trim() ? 1 : 0.5,
-                  }}
-                  onClick={handleCreateBlank}
-                  disabled={!boardName.trim()}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <line x1="12" y1="8" x2="12" y2="16" />
-                    <line x1="8" y1="12" x2="16" y2="12" />
-                  </svg>
-                  Open Existing Board
-                </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
