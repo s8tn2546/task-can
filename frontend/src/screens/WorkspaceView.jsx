@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../contexts/AppContext';
@@ -6,19 +6,52 @@ import { useApp } from '../contexts/AppContext';
 export default function WorkspaceView() {
   const { workspaceId } = useParams();
   const navigate = useNavigate();
-  const { state, createBoard } = useApp();
+  const { state, createBoard, loadWorkspace } = useApp();
   const [showCreate, setShowCreate] = useState(false);
   const [boardName, setBoardName] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchWorkspace() {
+      try {
+        if (workspaceId) {
+          await loadWorkspace(workspaceId);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchWorkspace();
+
+    return () => {
+      active = false;
+    };
+  }, [loadWorkspace, workspaceId]);
 
   const workspace = state.workspaces.find((w) => w.id === workspaceId);
   const boards = state.boards[workspaceId] || [];
 
-  function handleCreateAi() {
+  async function handleCreateAi() {
     if (!boardName.trim()) return;
-    const board = createBoard(workspaceId, boardName.trim());
+    const board = await createBoard(workspaceId, boardName.trim());
     setBoardName('');
     setShowCreate(false);
     navigate(`/workspace/${workspaceId}/boards/new?boardId=${board.id}&name=${encodeURIComponent(board.name)}`);
+  }
+
+  if (loading) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.notFound}>
+          <h2>Loading workspace...</h2>
+        </div>
+      </div>
+    );
   }
 
   if (!workspace) {

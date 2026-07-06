@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../contexts/AppContext';
@@ -40,7 +40,7 @@ function useIsMobile() {
 export default function BoardView() {
   const { boardId } = useParams();
   const navigate = useNavigate();
-  const { state, moveTask, addTask, generateTasks } = useApp();
+  const { state, moveTask, addTask, loadBoard } = useApp();
   const isMobile = useIsMobile();
 
   const [mobileCol, setMobileCol] = useState(0);
@@ -51,10 +51,32 @@ export default function BoardView() {
   const [addDescription, setAddDescription] = useState('');
   const [showTransfer, setShowTransfer] = useState(null);
   const [longPressProgress, setLongPressProgress] = useState(null);
+  const [loading, setLoading] = useState(true);
   const longPressTimer = useRef(null);
-  const longPressRef = useRef(null);
 
-  const boardTasks = state.tasks[boardId] || [];
+  useEffect(() => {
+    let active = true;
+
+    async function fetchBoard() {
+      try {
+        if (boardId) {
+          await loadBoard(boardId);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchBoard();
+
+    return () => {
+      active = false;
+    };
+  }, [boardId, loadBoard]);
+
+  const boardTasks = useMemo(() => state.tasks[boardId] || [], [state.tasks, boardId]);
   const generating = state.generatingTasks;
 
   let boardName = 'Board';
@@ -64,8 +86,19 @@ export default function BoardView() {
     const found = boards.find((b) => b.id === boardId);
     if (found) {
       boardName = found.name;
-      workspaceId = ws.id;
+      workspaceId = found.workspaceId || ws.id;
       break;
+    }
+  }
+
+  if (!workspaceId) {
+    for (const [key, boards] of Object.entries(state.boards)) {
+      const found = boards.find((board) => board.id === boardId);
+      if (found) {
+        boardName = found.name;
+        workspaceId = found.workspaceId || key;
+        break;
+      }
     }
   }
 
@@ -82,14 +115,14 @@ export default function BoardView() {
     setDragItem(task.id);
   }
 
-  function handleDragOver(e, colId) {
+  function handleDragOver(e) {
     e.preventDefault();
   }
 
   function handleDrop(e, colId) {
     e.preventDefault();
     if (dragItem) {
-      moveTask(boardId, dragItem, colId);
+      void moveTask(boardId, dragItem, colId);
     }
     setDragItem(null);
   }
@@ -101,7 +134,7 @@ export default function BoardView() {
     setShowAddModal(true);
   }
 
-  function confirmAddTask() {
+  async function confirmAddTask() {
     if (!addTitle.trim()) return;
     const task = {
       id: `t-${Date.now()}`,
@@ -113,12 +146,12 @@ export default function BoardView() {
       parentId: null,
       createdAt: Date.now(),
     };
-    addTask(boardId, task);
+    await addTask(boardId, task);
     setShowAddModal(false);
   }
 
   function handleTransfer(taskId, toColumn) {
-    moveTask(boardId, taskId, toColumn);
+    void moveTask(boardId, taskId, toColumn);
     setShowTransfer(null);
   }
 
@@ -142,6 +175,12 @@ export default function BoardView() {
   return (
     <div style={styles.page}>
       <NotificationPrompt />
+
+      {loading && (
+        <div style={styles.loadingOverlay}>
+          <div style={styles.loadingCard}>Loading board...</div>
+        </div>
+      )}
 
       <header style={styles.header}>
         <div style={styles.headerLeft}>
@@ -168,16 +207,12 @@ export default function BoardView() {
       {isMobile ? (
         <MobileBoardView
           columns={COLUMNS}
-          boardId={boardId}
           mobileCol={mobileCol}
           setMobileCol={setMobileCol}
           getColumnTasks={getColumnTasks}
           getSubtasks={getSubtasks}
           handleAddTask={handleAddTask}
           generating={generating}
-          showTransfer={showTransfer}
-          setShowTransfer={setShowTransfer}
-          handleTransfer={handleTransfer}
           longPressProgress={longPressProgress}
           startLongPress={startLongPress}
           cancelLongPress={cancelLongPress}
@@ -185,7 +220,6 @@ export default function BoardView() {
       ) : (
         <DesktopBoardView
           columns={COLUMNS}
-          boardId={boardId}
           getColumnTasks={getColumnTasks}
           getSubtasks={getSubtasks}
           handleAddTask={handleAddTask}
@@ -216,7 +250,7 @@ export default function BoardView() {
             >
               <h2 style={styles.modalTitle}>Add Task</h2>
               <p style={styles.modalSub}>
-                to <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{COLUMNS.find((c) => c.id === addCol)?.label}</span>
+                to <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{(COLUMNS.find((c) => c.id === addCol) || {}).label}</span>
               </p>
               <div style={styles.modalForm}>
                 <input
@@ -276,9 +310,9 @@ export default function BoardView() {
             >
               <div style={styles.sheetHandle} />
               <h3 style={styles.sheetTitle}>Move task</h3>
-              <p style={styles.sheetSub}>{showTransfer?.title}</p>
+              <p style={styles.sheetSub}>{showTransfer ? showTransfer.title : ''}</p>
               <div style={styles.sheetOptions}>
-                {COLUMNS.filter((c) => c.id !== showTransfer?.column).map((col) => (
+                {COLUMNS.filter((c) => !showTransfer || c.id !== showTransfer.column).map((col) => (
                   <motion.button
                     key={col.id}
                     whileHover={{ scale: 1.02 }}
@@ -332,13 +366,13 @@ function TaskCard({
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
       draggable={!isMobile}
-      onDragStart={() => onDragStart?.(task)}
+      onDragStart={onDragStart ? () => onDragStart(task) : undefined}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      onMouseDown={(e) => isMobile && onLongPress?.(e, task)}
+      onMouseDown={(e) => isMobile && onLongPress && onLongPress(e, task)}
       onMouseUp={onLongPressEnd}
       onMouseLeave={onLongPressEnd}
-      onTouchStart={(e) => isMobile && onLongPress?.(e, task)}
+      onTouchStart={(e) => isMobile && onLongPress && onLongPress(e, task)}
       onTouchEnd={onLongPressEnd}
       onTouchMove={onLongPressEnd}
       style={{
@@ -409,8 +443,8 @@ function Column({
   return (
     <div
       style={styles.column}
-      onDragOver={(e) => onDragOver?.(e, column.id)}
-      onDrop={(e) => onDrop?.(e, column.id)}
+      onDragOver={onDragOver ? (e) => onDragOver(e, column.id) : undefined}
+      onDrop={onDrop ? (e) => onDrop(e, column.id) : undefined}
     >
       <div style={styles.columnHeader}>
         <div style={styles.columnHeaderLeft}>
@@ -421,7 +455,7 @@ function Column({
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           style={styles.addTaskBtn}
-          onClick={() => onAddTask?.(column.id)}
+          onClick={onAddTask ? () => onAddTask(column.id) : undefined}
           title="Add task"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -462,22 +496,22 @@ function Column({
                   task={task}
                   isSubtask={false}
                   onDragStart={onDragStart}
-                  onDragOver={(e) => onDragOver?.(e, column.id)}
-                  onDrop={(e) => onDrop?.(e, column.id)}
+                  onDragOver={onDragOver ? (e) => onDragOver(e, column.id) : undefined}
+                  onDrop={onDrop ? (e) => onDrop(e, column.id) : undefined}
                   isDragging={dragItem === task.id}
                   isMobile={isMobile}
                   onLongPress={onLongPress}
                   onLongPressEnd={onLongPressEnd}
                   isLongPressing={longPressProgress === task.id}
                 />
-                {subtasksMap[task.id]?.map((sub) => (
+                {(subtasksMap[task.id] || []).map((sub) => (
                   <TaskCard
                     key={sub.id}
                     task={sub}
                     isSubtask={true}
                     onDragStart={onDragStart}
-                    onDragOver={(e) => onDragOver?.(e, column.id)}
-                    onDrop={(e) => onDrop?.(e, column.id)}
+                    onDragOver={onDragOver ? (e) => onDragOver(e, column.id) : undefined}
+                    onDrop={onDrop ? (e) => onDrop(e, column.id) : undefined}
                     isDragging={dragItem === sub.id}
                     isMobile={isMobile}
                     onLongPress={onLongPress}
@@ -496,7 +530,6 @@ function Column({
 
 function DesktopBoardView({
   columns,
-  boardId,
   getColumnTasks,
   getSubtasks,
   handleAddTask,
@@ -538,16 +571,12 @@ function DesktopBoardView({
 
 function MobileBoardView({
   columns,
-  boardId,
   mobileCol,
   setMobileCol,
   getColumnTasks,
   getSubtasks,
   handleAddTask,
   generating,
-  showTransfer,
-  setShowTransfer,
-  handleTransfer,
   longPressProgress,
   startLongPress,
   cancelLongPress,
@@ -567,29 +596,38 @@ function MobileBoardView({
   return (
     <main style={styles.boardMobile}>
       <div style={styles.mobileDots}>
-        {columns.map((col, i) => (
+        {columns.map((col) => {
+          const activeColumn = columns[mobileCol];
+          const isActive = activeColumn && activeColumn.id === col.id;
+
+          return (
           <button
             key={col.id}
             style={{
               ...styles.dotNav,
-              background: i === mobileCol ? 'var(--accent)' : 'var(--border-subtle)',
-              width: i === mobileCol ? '20px' : '8px',
+              background: isActive ? 'var(--accent)' : 'var(--border-subtle)',
+              width: isActive ? '20px' : '8px',
             }}
             onClick={() => {
-              setMobileCol(i);
-              scrollRef.current?.children[i]?.scrollIntoView({ behavior: 'smooth', inline: 'start' });
+              const columnIndex = columns.findIndex((item) => item.id === col.id);
+              setMobileCol(columnIndex);
+              if (scrollRef.current && scrollRef.current.children[columnIndex]) {
+                scrollRef.current.children[columnIndex].scrollIntoView({ behavior: 'smooth', inline: 'start' });
+              }
             }}
           />
-        ))}
+          );
+        })}
       </div>
 
       <div ref={scrollRef} style={styles.mobileScroll} onScroll={handleScroll}>
-        {columns.map((col, i) => {
+        {columns.map((col) => {
           const tasks = getColumnTasks(col.id);
           const subtasksMap = {};
-          tasks.forEach((t) => {
-            subtasksMap[t.id] = getSubtasks(t.id);
+          tasks.forEach((task) => {
+            subtasksMap[task.id] = getSubtasks(task.id);
           });
+
           return (
             <div key={col.id} style={styles.mobileColWrap}>
               <Column
@@ -618,6 +656,25 @@ const styles = {
     flexDirection: 'column',
     background: 'var(--bg-primary)',
     overflow: 'hidden',
+    position: 'relative',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    inset: '64px 0 0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+    zIndex: 5,
+  },
+  loadingCard: {
+    padding: '12px 16px',
+    borderRadius: 'var(--radius-md)',
+    background: 'var(--bg-surface-raised)',
+    border: '1px solid var(--border-subtle)',
+    boxShadow: 'var(--shadow-md)',
+    color: 'var(--text-secondary)',
+    fontSize: '14px',
   },
   header: {
     display: 'flex',
@@ -665,7 +722,6 @@ const styles = {
     letterSpacing: '-0.3px',
   },
 
-  /* Desktop board */
   boardDesktop: {
     flex: 1,
     overflow: 'hidden',
@@ -678,7 +734,6 @@ const styles = {
     height: '100%',
   },
 
-  /* Column */
   column: {
     background: 'var(--bg-surface)',
     borderRadius: 'var(--radius-lg)',
@@ -737,7 +792,6 @@ const styles = {
     gap: '8px',
   },
 
-  /* Task card */
   taskCard: {
     background: 'var(--bg-card)',
     border: '1px solid var(--border-subtle)',
@@ -825,7 +879,6 @@ const styles = {
     background: 'rgba(229, 85, 75, 0.1)',
   },
 
-  /* Empty state */
   emptyState: {
     display: 'flex',
     flexDirection: 'column',
@@ -846,7 +899,6 @@ const styles = {
     color: 'var(--text-tertiary)',
   },
 
-  /* Generating indicator */
   generatingIndicator: {
     display: 'flex',
     flexDirection: 'column',
@@ -870,7 +922,6 @@ const styles = {
     color: 'var(--ai-badge-text)',
   },
 
-  /* Mobile */
   boardMobile: {
     flex: 1,
     display: 'flex',
@@ -911,7 +962,6 @@ const styles = {
     flexDirection: 'column',
   },
 
-  /* Overlay/Modal */
   overlay: {
     position: 'fixed',
     inset: 0,
@@ -981,7 +1031,6 @@ const styles = {
     fontWeight: '600',
   },
 
-  /* Bottom sheet (mobile transfer) */
   bottomSheet: {
     position: 'fixed',
     bottom: 0,

@@ -6,17 +6,13 @@ import { useApp } from '../contexts/AppContext';
 export default function BoardCreationChoice() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { state, generateTasks, createBoard } = useApp();
+  const { state, generateTasks } = useApp();
   const [prompt, setPrompt] = useState('');
   const [mode, setMode] = useState(null);
 
   const boardId = searchParams.get('boardId');
   const boardName = searchParams.get('name') || 'Untitled';
   const generating = state.generatingTasks;
-
-  const workspaceId = state.workspaces.find((w) =>
-    (state.boards[w.id] || []).some((b) => b.id === boardId)
-  )?.id;
 
   function handleAIAssisted() {
     setMode('ai');
@@ -29,7 +25,7 @@ export default function BoardCreationChoice() {
   function handleGenerate() {
     if (!prompt.trim() || generating) return;
     if (!boardId) return;
-    generateTasks(boardId, prompt.trim());
+    void generateTasks(boardId, prompt.trim());
     navigate(`/board/${boardId}`);
   }
 

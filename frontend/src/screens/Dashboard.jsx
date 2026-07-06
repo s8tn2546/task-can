@@ -1,18 +1,39 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../contexts/AppContext';
 import NotificationPrompt from '../components/NotificationPrompt';
 
 export default function Dashboard() {
-  const { state, createWorkspace, logout } = useApp();
+  const { state, createWorkspace, logout, loadWorkspaces } = useApp();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
   const [wsName, setWsName] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  function handleCreate() {
+  useEffect(() => {
+    let active = true;
+
+    async function fetchWorkspaces() {
+      try {
+        await loadWorkspaces();
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchWorkspaces();
+
+    return () => {
+      active = false;
+    };
+  }, [loadWorkspaces]);
+
+  async function handleCreate() {
     if (!wsName.trim()) return;
-    const ws = createWorkspace(wsName.trim());
+    const ws = await createWorkspace(wsName.trim());
     setWsName('');
     setShowCreate(false);
     navigate(`/workspace/${ws.id}`);
@@ -53,7 +74,9 @@ export default function Dashboard() {
         <div style={styles.greeting}>
           <h1 style={styles.title}>Your Workspaces</h1>
           <p style={styles.subtitle}>
-            {state.workspaces.length === 0
+            {loading
+              ? 'Loading workspaces...'
+              : state.workspaces.length === 0
               ? 'Create your first workspace to get started'
               : `${state.workspaces.length} workspace${state.workspaces.length > 1 ? 's' : ''}`}
           </p>
@@ -100,6 +123,7 @@ export default function Dashboard() {
             whileTap={{ scale: 0.98 }}
             style={styles.addCard}
             onClick={() => setShowCreate(true)}
+            disabled={loading}
           >
             <div style={styles.addIcon}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -151,7 +175,7 @@ export default function Dashboard() {
                     opacity: wsName.trim() ? 1 : 0.5,
                   }}
                   onClick={handleCreate}
-                  disabled={!wsName.trim()}
+                  disabled={!wsName.trim() || loading}
                 >
                   Create
                 </motion.button>

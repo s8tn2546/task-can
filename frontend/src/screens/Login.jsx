@@ -10,26 +10,37 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    login({
-      uid: 'demo-user-1',
-      email,
-      displayName: name || email.split('@')[0],
-      photoURL: null,
-    });
-    navigate('/');
+    setSubmitting(true);
+    try {
+      await login({
+        uid: 'demo-user-1',
+        email,
+        displayName: name || email.split('@')[0],
+        photoURL: null,
+      });
+      navigate('/');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleGoogleSignIn() {
-    login({
-      uid: 'demo-google-user',
-      email: 'user@gmail.com',
-      displayName: 'Demo User',
-      photoURL: null,
-    });
-    navigate('/');
+  async function handleGoogleSignIn() {
+    setSubmitting(true);
+    try {
+      await login({
+        uid: 'demo-google-user',
+        email: 'user@gmail.com',
+        displayName: 'Demo User',
+        photoURL: null,
+      });
+      navigate('/');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -96,6 +107,7 @@ export default function Login() {
             whileTap={{ scale: 0.98 }}
             style={styles.primaryBtn}
             type="submit"
+            disabled={submitting}
           >
             {isSignup ? 'Create Account' : 'Sign In'}
           </motion.button>
@@ -112,6 +124,8 @@ export default function Login() {
           whileTap={{ scale: 0.98 }}
           style={styles.googleBtn}
           onClick={handleGoogleSignIn}
+          type="button"
+          disabled={submitting}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -127,6 +141,8 @@ export default function Login() {
           <button
             style={styles.switchLink}
             onClick={() => setIsSignup(!isSignup)}
+            type="button"
+            disabled={submitting}
           >
             {isSignup ? 'Sign In' : 'Sign Up'}
           </button>

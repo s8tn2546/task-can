@@ -181,6 +181,7 @@ Required values are documented in `backend/.env.example`:
 - `FIREBASE_PRIVATE_KEY`
 - `GROQ_API_KEY`
 - `PORT=5000`
+- `DEV_AUTH_BYPASS=true` for local frontend login without a live Firebase token
 
 ## How to Check If the Backend Is Working
 These are the main API calls you can use after starting the server.

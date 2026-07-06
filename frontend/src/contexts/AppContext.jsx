@@ -1,180 +1,149 @@
-import { createContext, useContext, useReducer, useCallback } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+
+import { createContext, useCallback, useContext, useReducer } from 'react';
+import {
+  apiRequest,
+  clearStoredSession,
+  makeDemoSession,
+  mapBoard,
+  mapTask,
+  mapWorkspace,
+  readStoredSession,
+  saveStoredSession,
+} from '../services/taskcanApi';
 
 const AppContext = createContext(null);
 
+const storedSession = readStoredSession();
+
 const initialState = {
-  user: null,
-  workspaces: [
-    { id: 'ws-1', name: 'Personal', boardCount: 2, createdAt: Date.now() - 86400000 },
-    { id: 'ws-2', name: 'Work', boardCount: 1, createdAt: Date.now() - 172800000 },
-  ],
-  boards: {
-    'ws-1': [
-      {
-        id: 'b-1',
-        name: 'Weekly Goals',
-        workspaceId: 'ws-1',
-        createdAt: Date.now() - 43200000,
-      },
-      {
-        id: 'b-2',
-        name: 'Project Alpha',
-        workspaceId: 'ws-1',
-        createdAt: Date.now() - 21600000,
-      },
-    ],
-    'ws-2': [
-      {
-        id: 'b-3',
-        name: 'Sprint 12',
-        workspaceId: 'ws-2',
-        createdAt: Date.now() - 10800000,
-      },
-    ],
-  },
-  tasks: {
-    'b-1': [
-      {
-        id: 't-1',
-        title: 'Review PR #42',
-        description: 'Check the new authentication flow implementation',
-        column: 'todo',
-        dueDate: null,
-        isAiGenerated: false,
-        parentId: null,
-        createdAt: Date.now() - 3600000,
-      },
-      {
-        id: 't-2',
-        title: 'Write unit tests for API module',
-        description: 'Cover edge cases for rate limiting',
-        column: 'ongoing',
-        dueDate: Date.now() + 86400000,
-        isAiGenerated: false,
-        parentId: null,
-        createdAt: Date.now() - 7200000,
-      },
-      {
-        id: 't-3',
-        title: 'Update dependencies',
-        description: 'Bump react-router-dom to v7',
-        column: 'todo',
-        dueDate: Date.now() + 172800000,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now() - 14400000,
-      },
-      {
-        id: 't-4',
-        title: 'Set up CI/CD pipeline',
-        description: 'GitHub Actions for staging deploy',
-        column: 'completed',
-        dueDate: null,
-        isAiGenerated: false,
-        parentId: null,
-        createdAt: Date.now() - 86400000,
-      },
-      {
-        id: 't-5',
-        title: 'Research caching strategies',
-        description: 'Redis vs CDN for static assets',
-        column: 'todo',
-        dueDate: Date.now() + 259200000,
-        isAiGenerated: false,
-        parentId: null,
-        createdAt: Date.now() - 3600000,
-      },
-      {
-        id: 't-6',
-        title: 'Update API docs',
-        description: 'Document new /v2/events endpoint',
-        column: 'todo',
-        dueDate: null,
-        isAiGenerated: true,
-        parentId: 't-1',
-        createdAt: Date.now() - 1800000,
-      },
-      {
-        id: 't-7',
-        title: 'Add pagination to user list',
-        description: 'Cursor-based pagination for /users',
-        column: 'ongoing',
-        dueDate: Date.now() + 43200000,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now() - 900000,
-      },
-    ],
-    'b-2': [],
-    'b-3': [],
-  },
+  user: storedSession?.user || null,
+  token: storedSession?.token || null,
+  workspaces: [],
+  boards: {},
+  tasks: {},
   generatingTasks: false,
 };
 
+function sortByCreatedAt(left, right) {
+  return new Date(right.createdAt) - new Date(left.createdAt);
+}
+
+function upsertWorkspace(workspaces, workspace, boardCount) {
+  const nextWorkspace = { ...workspace, boardCount };
+  return [
+    nextWorkspace,
+    ...workspaces.filter((item) => item.id !== nextWorkspace.id),
+  ].sort(sortByCreatedAt);
+}
+
+function upsertBoardList(boards, board) {
+  return [board, ...boards.filter((item) => item.id !== board.id)].sort(sortByCreatedAt);
+}
+
 function reducer(state, action) {
   switch (action.type) {
-    case 'SET_USER':
-      return { ...state, user: action.payload };
-
-    case 'CREATE_WORKSPACE':
+    case 'SET_SESSION':
       return {
         ...state,
-        workspaces: [...state.workspaces, action.payload],
-        boards: { ...state.boards, [action.payload.id]: [] },
+        user: action.payload.user,
+        token: action.payload.token,
       };
 
-    case 'CREATE_BOARD': {
+    case 'CLEAR_SESSION':
+      return {
+        user: null,
+        token: null,
+        workspaces: [],
+        boards: {},
+        tasks: {},
+        generatingTasks: false,
+      };
+
+    case 'SET_WORKSPACES':
+      return {
+        ...state,
+        workspaces: action.payload.map((workspace) => ({
+          ...workspace,
+          boardCount: state.boards[workspace.id]?.length ?? workspace.boardCount ?? 0,
+        })),
+      };
+
+    case 'UPSERT_WORKSPACE':
+      return {
+        ...state,
+        workspaces: upsertWorkspace(
+          state.workspaces,
+          action.payload,
+          state.boards[action.payload.id]?.length ?? action.payload.boardCount ?? 0
+        ),
+      };
+
+    case 'SET_WORKSPACE_DETAIL': {
+      const workspace = mapWorkspace(action.payload.workspace);
+      const boards = action.payload.boards.map(mapBoard);
+      const nextTasks = { ...state.tasks };
+
+      boards.forEach((board) => {
+        if (!nextTasks[board.id]) {
+          nextTasks[board.id] = [];
+        }
+      });
+
+      return {
+        ...state,
+        workspaces: upsertWorkspace(state.workspaces, workspace, boards.length),
+        boards: {
+          ...state.boards,
+          [workspace.id]: boards,
+        },
+        tasks: nextTasks,
+      };
+    }
+
+    case 'UPSERT_BOARD': {
       const { workspaceId, board } = action.payload;
+      const nextBoards = upsertBoardList(state.boards[workspaceId] || [], board);
+
       return {
         ...state,
         boards: {
           ...state.boards,
-          [workspaceId]: [...(state.boards[workspaceId] || []), board],
+          [workspaceId]: nextBoards,
         },
-        tasks: { ...state.tasks, [board.id]: [] },
+        tasks: {
+          ...state.tasks,
+          [board.id]: state.tasks[board.id] || [],
+        },
+        workspaces: state.workspaces.map((workspace) =>
+          workspace.id === workspaceId ? { ...workspace, boardCount: nextBoards.length } : workspace
+        ),
       };
     }
 
-    case 'MOVE_TASK': {
-      const { boardId, taskId, toColumn } = action.payload;
-      const boardTasks = state.tasks[boardId];
-      if (!boardTasks) return state;
-      return {
-        ...state,
-        tasks: {
-          ...state.tasks,
-          [boardId]: boardTasks.map((t) =>
-            t.id === taskId ? { ...t, column: toColumn } : t
-          ),
-        },
-      };
-    }
+    case 'SET_BOARD_DETAIL': {
+      const { workspaceId, board, tasks } = action.payload;
+      const mappedBoard = mapBoard(board);
+      const nextBoards = upsertBoardList(state.boards[workspaceId] || [], mappedBoard);
 
-    case 'ADD_TASK': {
-      const { boardId, task } = action.payload;
       return {
         ...state,
+        boards: {
+          ...state.boards,
+          [workspaceId]: nextBoards,
+        },
         tasks: {
           ...state.tasks,
-          [boardId]: [...(state.tasks[boardId] || []), task],
+          [mappedBoard.id]: tasks.map(mapTask),
         },
+        workspaces: state.workspaces.map((workspace) =>
+          workspace.id === workspaceId ? { ...workspace, boardCount: nextBoards.length } : workspace
+        ),
       };
     }
 
     case 'SET_GENERATING':
       return { ...state, generatingTasks: action.payload };
-
-    case 'ADD_AI_TASKS': {
-      const { boardId, tasks } = action.payload;
-      return {
-        ...state,
-        tasks: {
-          ...state.tasks,
-          [boardId]: [...(state.tasks[boardId] || []), ...tasks],
-        },
-        generatingTasks: false,
-      };
-    }
 
     default:
       return state;
@@ -184,102 +153,141 @@ function reducer(state, action) {
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const login = useCallback((user) => {
-    dispatch({ type: 'SET_USER', payload: user });
+  const loadWorkspaces = useCallback(async () => {
+    if (!state.token) {
+      return [];
+    }
+
+    const workspaces = await apiRequest('/workspaces', { token: state.token });
+    const mappedWorkspaces = workspaces.map(mapWorkspace);
+    dispatch({ type: 'SET_WORKSPACES', payload: mappedWorkspaces });
+    return mappedWorkspaces;
+  }, [state.token]);
+
+  const loadWorkspace = useCallback(async (workspaceId) => {
+    if (!state.token) {
+      return null;
+    }
+
+    const workspace = await apiRequest(`/workspaces/${workspaceId}`, { token: state.token });
+    dispatch({
+      type: 'SET_WORKSPACE_DETAIL',
+      payload: {
+        workspace,
+        boards: workspace.boards || [],
+      },
+    });
+    return workspace;
+  }, [state.token]);
+
+  const loadBoard = useCallback(async (boardId) => {
+    if (!state.token) {
+      return null;
+    }
+
+    const board = await apiRequest(`/boards/${boardId}`, { token: state.token });
+    dispatch({
+      type: 'SET_BOARD_DETAIL',
+      payload: {
+        workspaceId: String(board.workspaceId),
+        board,
+        tasks: board.tasks || [],
+      },
+    });
+    return board;
+  }, [state.token]);
+
+  const login = useCallback(async (user) => {
+    const normalizedUser = {
+      uid: user.uid || `demo-${String(user.email || 'user').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      email: user.email,
+      displayName: user.displayName || user.name || user.email?.split('@')[0] || 'User',
+      photoURL: user.photoURL || null,
+    };
+    const session = makeDemoSession({
+      email: normalizedUser.email,
+      displayName: normalizedUser.displayName,
+      uid: normalizedUser.uid,
+    });
+
+    dispatch({ type: 'SET_SESSION', payload: { user: normalizedUser, token: session.token } });
+    saveStoredSession({ user: normalizedUser, token: session.token });
+
+    await apiRequest('/users/sync', {
+      method: 'POST',
+      token: session.token,
+    });
+
+    return normalizedUser;
   }, []);
 
   const logout = useCallback(() => {
-    dispatch({ type: 'SET_USER', payload: null });
+    clearStoredSession();
+    dispatch({ type: 'CLEAR_SESSION' });
   }, []);
 
-  const createWorkspace = useCallback((name) => {
-    const ws = {
-      id: `ws-${Date.now()}`,
-      name,
-      boardCount: 0,
-      createdAt: Date.now(),
-    };
-    dispatch({ type: 'CREATE_WORKSPACE', payload: ws });
-    return ws;
-  }, []);
+  const createWorkspace = useCallback(async (name) => {
+    const workspace = await apiRequest('/workspaces', {
+      method: 'POST',
+      token: state.token,
+      body: { name },
+    });
+    const mappedWorkspace = mapWorkspace(workspace);
+    dispatch({ type: 'UPSERT_WORKSPACE', payload: mappedWorkspace });
+    return mappedWorkspace;
+  }, [state.token]);
 
-  const createBoard = useCallback((workspaceId, name) => {
-    const board = {
-      id: `b-${Date.now()}`,
-      name,
-      workspaceId,
-      createdAt: Date.now(),
-    };
-    dispatch({ type: 'CREATE_BOARD', payload: { workspaceId, board } });
-    return board;
-  }, []);
+  const createBoard = useCallback(async (workspaceId, name) => {
+    const board = await apiRequest(`/workspaces/${workspaceId}/boards`, {
+      method: 'POST',
+      token: state.token,
+      body: { name },
+    });
+    const mappedBoard = mapBoard(board);
+    dispatch({
+      type: 'UPSERT_BOARD',
+      payload: { workspaceId, board: mappedBoard },
+    });
+    return mappedBoard;
+  }, [state.token]);
 
-  const moveTask = useCallback((boardId, taskId, toColumn) => {
-    dispatch({ type: 'MOVE_TASK', payload: { boardId, taskId, toColumn } });
-  }, []);
+  const moveTask = useCallback(async (boardId, taskId, toColumn) => {
+    await apiRequest(`/tasks/${taskId}`, {
+      method: 'PATCH',
+      token: state.token,
+      body: { status: toColumn },
+    });
+    await loadBoard(boardId);
+  }, [loadBoard, state.token]);
 
-  const addTask = useCallback((boardId, task) => {
-    dispatch({ type: 'ADD_TASK', payload: { boardId, task } });
-  }, []);
+  const addTask = useCallback(async (boardId, task) => {
+    await apiRequest(`/boards/${boardId}/tasks`, {
+      method: 'POST',
+      token: state.token,
+      body: {
+        title: task.title,
+        description: task.description,
+        status: task.column,
+        dueDate: task.dueDate ? new Date(task.dueDate).toISOString() : undefined,
+        parentTaskId: task.parentId || null,
+      },
+    });
+    await loadBoard(boardId);
+  }, [loadBoard, state.token]);
 
-  const generateTasks = useCallback((boardId, prompt) => {
+  const generateTasks = useCallback(async (boardId, prompt) => {
     dispatch({ type: 'SET_GENERATING', payload: true });
-    const sampleTasks = [
-      {
-        id: `t-${Date.now()}-1`,
-        title: `Plan ${prompt.split(' ').slice(0, 3).join(' ')}…`,
-        description: 'Outline key milestones and deliverables',
-        column: 'todo',
-        dueDate: Date.now() + 604800000,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now(),
-      },
-      {
-        id: `t-${Date.now()}-2`,
-        title: 'Gather required resources',
-        description: 'Identify team, tools, and budget needed',
-        column: 'todo',
-        dueDate: Date.now() + 345600000,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now(),
-      },
-      {
-        id: `t-${Date.now()}-3`,
-        title: 'Set up timeline and deadlines',
-        description: 'Break down phases with target dates',
-        column: 'todo',
-        dueDate: null,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now(),
-      },
-      {
-        id: `t-${Date.now()}-4`,
-        title: 'Assign responsibilities',
-        description: 'Match tasks to team members based on skills',
-        column: 'todo',
-        dueDate: Date.now() + 172800000,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now(),
-      },
-      {
-        id: `t-${Date.now()}-5`,
-        title: 'Review and adjust plan',
-        description: 'Weekly check-ins to track progress',
-        column: 'todo',
-        dueDate: Date.now() + 1209600000,
-        isAiGenerated: true,
-        parentId: null,
-        createdAt: Date.now(),
-      },
-    ];
-    setTimeout(() => {
-      dispatch({ type: 'ADD_AI_TASKS', payload: { boardId, tasks: sampleTasks } });
-    }, 2200);
-  }, []);
+    try {
+      await apiRequest(`/boards/${boardId}/ai-generate`, {
+        method: 'POST',
+        token: state.token,
+        body: { prompt },
+      });
+      await loadBoard(boardId);
+    } finally {
+      dispatch({ type: 'SET_GENERATING', payload: false });
+    }
+  }, [loadBoard, state.token]);
 
   const value = {
     state,
@@ -290,6 +298,9 @@ export function AppProvider({ children }) {
     moveTask,
     addTask,
     generateTasks,
+    loadWorkspaces,
+    loadWorkspace,
+    loadBoard,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
