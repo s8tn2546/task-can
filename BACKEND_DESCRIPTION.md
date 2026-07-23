@@ -184,9 +184,16 @@ Required values are documented in `backend/.env.example`:
 - `DEV_AUTH_BYPASS=true` for local frontend login without a live Firebase token
 
 ## How to Check If the Backend Is Working
-These are the main API calls you can use after starting the server.
+Use these checks after setting `backend/.env` and starting the server.
 
-### 1. Health Check
+### 1. Start the backend
+```bash
+cd backend
+npm start
+```
+Expected log: `TaskCan backend listening on port 5000`
+
+### 2. Check the public health route
 ```bash
 curl http://localhost:5000/health
 ```
@@ -195,69 +202,70 @@ Expected response:
 { "ok": true }
 ```
 
-### 2. Sync User
-Replace `YOUR_FIREBASE_ID_TOKEN` with a real Firebase ID token.
+### 3. Verify auth bypass in local development
+If `DEV_AUTH_BYPASS=true`, you can test authenticated routes without Firebase by sending a token shaped like `dev.<base64-json>`.
+
+Example token payload:
+```json
+{ "uid": "taskcan-check", "email": "check@example.com", "name": "Check User" }
+```
+
+Generate the token and call the sync route:
 ```bash
+TOKEN="dev.$(printf '%s' '{"uid":"taskcan-check","email":"check@example.com","name":"Check User"}' | base64 | tr -d '\n')"
+
 curl -X POST http://localhost:5000/api/users/sync \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json"
 ```
-Expected response: the synced user document.
+Expected response: the synced MongoDB user document.
 
-### 3. List Workspaces
+### 4. List workspaces
 ```bash
 curl http://localhost:5000/api/workspaces \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 ```
 Expected response: array of workspaces the user belongs to.
 
-### 4. Create Workspace
+### 5. Create a workspace
 ```bash
 curl -X POST http://localhost:5000/api/workspaces \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"Demo Workspace"}'
 ```
 Expected response: created workspace document.
 
-### 5. Get Workspace With Boards
+### 6. Open a workspace and create a board
 ```bash
 curl http://localhost:5000/api/workspaces/YOUR_WORKSPACE_ID \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN"
-```
-Expected response: workspace object with a `boards` array.
+  -H "Authorization: Bearer $TOKEN"
 
-### 6. Create Board
-```bash
 curl -X POST http://localhost:5000/api/workspaces/YOUR_WORKSPACE_ID/boards \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"Sprint Board"}'
 ```
-Expected response: created board document.
+Expected response: workspace details with boards, then a newly created board document.
 
-### 7. Get Board With Tasks
+### 7. Read and create board tasks
 ```bash
 curl http://localhost:5000/api/boards/YOUR_BOARD_ID \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN"
-```
-Expected response: board object with a `tasks` array.
+  -H "Authorization: Bearer $TOKEN"
 
-### 8. Get Board Tasks
-```bash
 curl http://localhost:5000/api/boards/YOUR_BOARD_ID/tasks \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN"
-```
-Expected response: array of tasks.
+  -H "Authorization: Bearer $TOKEN"
 
-### 9. Create Task
-```bash
 curl -X POST http://localhost:5000/api/boards/YOUR_BOARD_ID/tasks \
-  -H "Authorization: Bearer YOUR_FIREBASE_ID_TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"First task","description":"Check backend is alive","status":"todo"}'
 ```
-Expected response: created task document.
+Expected response: board data, task list, and a created task document.
+
+### 8. Confirm access control
+Try the same request without `Authorization` or with an invalid token.
+Expected response: `401 Unauthorized`.
 
 ### 10. Update Task
 ```bash
